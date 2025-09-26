@@ -133,19 +133,151 @@ const validateAdviceContent = (advice) => {
   );
 };
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const classifyError = (error) => {
+  if (!error.response) {
+    // Network error, timeout, or connection issue
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return {
+        type: 'TIMEOUT',
+        message: 'Request timed out. Please check your internet connection and try again.',
+        retryable: true
+      };
+    }
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      return {
+        type: 'NETWORK',
+        message: 'Unable to connect to AI service. Please check your internet connection.',
+        retryable: true
+      };
+    }
+    return {
+      type: 'NETWORK',
+      message: 'Network error occurred. Please try again.',
+      retryable: true
+    };
+  }
+
+  const status = error.response.status;
+
+  switch (status) {
+    case 401:
+      return {
+        type: 'AUTH',
+        message: 'AI service authentication failed. Please check your API configuration.',
+        retryable: false
+      };
+    case 429:
+      const retryAfter = error.response.headers['retry-after'];
+      return {
+        type: 'RATE_LIMIT',
+        message: `Too many requests. Please wait ${retryAfter ? `${retryAfter} seconds` : 'a moment'} before trying again.`,
+        retryable: true,
+        retryAfter: retryAfter ? parseInt(retryAfter) * 1000 : 60000
+      };
+    case 400:
+      return {
+        type: 'BAD_REQUEST',
+        message: 'Invalid request format. Using fallback advice.',
+        retryable: false
+      };
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return {
+        type: 'SERVER_ERROR',
+        message: 'AI service is temporarily unavailable. Using fallback advice.',
+        retryable: true
+      };
+    default:
+      return {
+        type: 'UNKNOWN',
+        message: `Unexpected error occurred (${status}). Using fallback advice.`,
+        retryable: status >= 500
+      };
+  }
+};
+
+const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`OpenAI API attempt ${attempt}/${maxRetries}`);
+
+      const response = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        requestConfig.data,
+        {
+          ...requestConfig.config,
+          timeout: 30000 // 30 second timeout
+        }
+      );
+
+      // Validate response structure
+      if (!response.data || !response.data.choices || !response.data.choices[0] || !response.data.choices[0].message) {
+        throw new Error('Invalid response structure from OpenAI API');
+      }
+
+      console.log('OpenAI API request successful');
+      return response;
+
+    } catch (error) {
+      lastError = error;
+      const errorInfo = classifyError(error);
+
+      console.error(`OpenAI API attempt ${attempt} failed:`, {
+        type: errorInfo.type,
+        message: errorInfo.message,
+        status: error.response?.status,
+        retryable: errorInfo.retryable
+      });
+
+      // Don't retry if error is not retryable or if this was the last attempt
+      if (!errorInfo.retryable || attempt === maxRetries) {
+        throw { ...error, classified: errorInfo };
+      }
+
+      // Exponential backoff with jitter
+      const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+      const jitter = Math.random() * 1000;
+      const delay = errorInfo.retryAfter || (baseDelay + jitter);
+
+      console.log(`Retrying after ${Math.round(delay)}ms...`);
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+};
+
 const getWeatherAdvice = async (weatherData, activePreferences = []) => {
   if (!weatherData) {
-    throw new Error("Weather data is required");
+    const error = new Error("Weather data is required");
+    error.classified = { type: 'VALIDATION', message: 'Weather data not available', retryable: false };
+    throw error;
   }
 
   const formattedWeather = formatWeatherData(weatherData);
 
   try {
+    // Validate API key existence
+    if (!apiKeys.openaiApiKey || apiKeys.openaiApiKey === "your-openai-api-key-here") {
+      const error = new Error("OpenAI API key not configured");
+      error.classified = {
+        type: 'CONFIG',
+        message: 'AI service not configured. Using fallback advice.',
+        retryable: false
+      };
+      throw error;
+    }
+
     const { systemPrompt, userPrompt } = createStructuredPrompt(formattedWeather, activePreferences);
 
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
+    const requestConfig = {
+      data: {
         model: "gpt-3.5-turbo",
         messages: [
           {
@@ -160,28 +292,49 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
         max_tokens: 300,
         temperature: 0.7
       },
-      {
+      config: {
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKeys.openaiApiKey}`
         }
       }
-    );
+    };
 
+    const response = await makeOpenAIRequest(requestConfig);
     const rawResponse = response.data.choices[0].message.content.trim();
+
+    if (!rawResponse || rawResponse.length < 10) {
+      throw new Error('Empty or insufficient response from OpenAI API');
+    }
+
     const structuredAdvice = parseStructuredResponse(rawResponse);
 
     if (structuredAdvice && validateAdviceContent(structuredAdvice)) {
+      console.log('Successfully generated structured advice from OpenAI');
       return structuredAdvice;
     } else {
-      // Fallback to generated advice if parsing fails
-      console.warn('Using fallback advice due to parsing failure');
-      return getFallbackAdvice(formattedWeather);
+      console.warn('OpenAI response parsing failed, using fallback advice');
+      const fallbackAdvice = getFallbackAdvice(formattedWeather);
+      // Mark as fallback for user notification
+      fallbackAdvice._isFallback = true;
+      return fallbackAdvice;
     }
+
   } catch (error) {
-    console.error("Error getting weather advice:", error);
-    // Return fallback advice on API error
-    return getFallbackAdvice(formattedWeather);
+    const errorInfo = error.classified || classifyError(error);
+
+    console.error("OpenAI API error:", {
+      type: errorInfo.type,
+      message: errorInfo.message,
+      originalError: error.message
+    });
+
+    // Always return fallback advice with error info
+    const fallbackAdvice = getFallbackAdvice(formattedWeather);
+    fallbackAdvice._isFallback = true;
+    fallbackAdvice._errorInfo = errorInfo;
+
+    return fallbackAdvice;
   }
 };
 

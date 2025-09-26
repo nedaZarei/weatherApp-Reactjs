@@ -7,6 +7,8 @@ function AIAssistant({ weatherData }) {
   const [advice, setAdvice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [errorInfo, setErrorInfo] = useState(null);
+  const [isUsingFallback, setIsUsingFallback] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [userPreferences, setUserPreferences] = useState(getPreferences());
@@ -47,12 +49,15 @@ function AIAssistant({ weatherData }) {
   const handleGetAdvice = async () => {
     if (!weatherData) {
       setError("Weather data not available");
+      setErrorInfo({ type: 'VALIDATION', retryable: false });
       return;
     }
 
     setLoading(true);
     setError("");
+    setErrorInfo(null);
     setAdvice("");
+    setIsUsingFallback(false);
 
     try {
       const activePrefs = getActivePreferences();
@@ -60,22 +65,32 @@ function AIAssistant({ weatherData }) {
 
       if (adviceData && typeof adviceData === 'object' &&
           (adviceData.clothing || adviceData.activities || adviceData.health)) {
-        setAdvice(adviceData);
+
+        // Check if this is fallback advice
+        if (adviceData._isFallback) {
+          setIsUsingFallback(true);
+          if (adviceData._errorInfo) {
+            setErrorInfo(adviceData._errorInfo);
+          }
+          // Remove metadata before setting advice
+          const cleanedAdvice = { ...adviceData };
+          delete cleanedAdvice._isFallback;
+          delete cleanedAdvice._errorInfo;
+          setAdvice(cleanedAdvice);
+        } else {
+          setAdvice(adviceData);
+        }
       } else {
         throw new Error("Invalid response from AI service");
       }
     } catch (err) {
       console.error("Error getting advice:", err);
 
-      if (err.response && err.response.status === 401) {
-        setError("API authentication failed. Please check your OpenAI API key.");
-      } else if (err.response && err.response.status === 429) {
-        setError("API rate limit exceeded. Please try again later.");
-      } else if (err.name === 'NetworkError' || err.code === 'NETWORK_ERROR') {
-        setError("Network error. Please check your internet connection.");
-      } else {
-        setError("Failed to get weather advice. Please try again.");
-      }
+      // Check if error has classification info
+      const errorInfo = err.classified || { type: 'UNKNOWN', message: 'Unknown error occurred', retryable: true };
+
+      setError(errorInfo.message);
+      setErrorInfo(errorInfo);
     } finally {
       setLoading(false);
     }
@@ -127,20 +142,50 @@ function AIAssistant({ weatherData }) {
                 </div>
               )}
 
-              {error && (
+              {error && !advice && (
                 <div className="error">
                   <h4>⚠️ Unable to Get Advice</h4>
                   <p>{error}</p>
-                  <button onClick={handleGetAdvice} className="retry-button">
-                    Try Again
-                  </button>
+                  {errorInfo && (
+                    <div className="error-details">
+                      <small>Error type: {errorInfo.type}</small>
+                    </div>
+                  )}
+                  {errorInfo && errorInfo.retryable && (
+                    <button onClick={handleGetAdvice} className="retry-button">
+                      🔄 Try Again
+                    </button>
+                  )}
+                  {errorInfo && !errorInfo.retryable && (
+                    <div className="non-retryable-notice">
+                      <small>This error cannot be retried automatically.</small>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {advice && !loading && !error && (
+              {advice && !loading && (
                 <div className="structured-advice">
+                  {isUsingFallback && (
+                    <div className="fallback-notice">
+                      <div className="fallback-header">
+                        <span className="fallback-icon">🔧</span>
+                        <div className="fallback-text">
+                          <strong>Using Offline Advice</strong>
+                          <small>
+                            {errorInfo ?
+                              `AI service unavailable (${errorInfo.type}). Showing weather-based recommendations.` :
+                              'AI service unavailable. Showing weather-based recommendations.'
+                            }
+                          </small>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="advice-header">
-                    <h4>🌤️ Weather Advice for {weatherData.city}</h4>
+                    <h4>
+                      {isUsingFallback ? '📋' : '🤖'} Weather Advice for {weatherData.city}
+                    </h4>
                     <small>{weatherData.temperatureC}°C • {weatherData.main}</small>
                   </div>
 
