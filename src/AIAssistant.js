@@ -56,10 +56,11 @@ function AIAssistant({ weatherData }) {
 
     try {
       const activePrefs = getActivePreferences();
-      const adviceText = await getWeatherAdvice(weatherData, activePrefs);
+      const adviceData = await getWeatherAdvice(weatherData, activePrefs);
 
-      if (adviceText && typeof adviceText === 'string' && adviceText.trim()) {
-        setAdvice(adviceText);
+      if (adviceData && typeof adviceData === 'object' &&
+          (adviceData.clothing || adviceData.activities || adviceData.health)) {
+        setAdvice(adviceData);
       } else {
         throw new Error("Invalid response from AI service");
       }
@@ -120,34 +121,79 @@ function AIAssistant({ weatherData }) {
             <div className="ai-assistant-content">
               {loading && (
                 <div className="loading">
-                  <p>Getting personalized weather advice...</p>
+                  <div className="loading-spinner">🤖</div>
+                  <p>Analyzing weather conditions...</p>
+                  <small>Generating personalized advice</small>
                 </div>
               )}
 
               {error && (
                 <div className="error">
-                  <p>Error: {error}</p>
-                  <button onClick={handleGetAdvice}>Try Again</button>
+                  <h4>⚠️ Unable to Get Advice</h4>
+                  <p>{error}</p>
+                  <button onClick={handleGetAdvice} className="retry-button">
+                    Try Again
+                  </button>
                 </div>
               )}
 
               {advice && !loading && !error && (
-                <div className="advice">
-                  <p>{advice}</p>
-                  <button onClick={handleGetAdvice} className="refresh-advice-button">
-                    Get New Advice
-                  </button>
+                <div className="structured-advice">
+                  <div className="advice-header">
+                    <h4>🌤️ Weather Advice for {weatherData.city}</h4>
+                    <small>{weatherData.temperatureC}°C • {weatherData.main}</small>
+                  </div>
+
+                  <div className="advice-cards">
+                    {advice.clothing && (
+                      <div className="advice-card clothing-card">
+                        <div className="card-header">
+                          <span className="card-icon">👔</span>
+                          <h5>What to Wear</h5>
+                        </div>
+                        <p>{advice.clothing}</p>
+                      </div>
+                    )}
+
+                    {advice.activities && (
+                      <div className="advice-card activities-card">
+                        <div className="card-header">
+                          <span className="card-icon">🏃</span>
+                          <h5>Activities</h5>
+                        </div>
+                        <p>{advice.activities}</p>
+                      </div>
+                    )}
+
+                    {advice.health && (
+                      <div className="advice-card health-card">
+                        <div className="card-header">
+                          <span className="card-icon">🏥</span>
+                          <h5>Health & Safety</h5>
+                        </div>
+                        <p>{advice.health}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="advice-actions">
+                    <button onClick={handleGetAdvice} className="refresh-advice-button">
+                      🔄 Get New Advice
+                    </button>
+                  </div>
                 </div>
               )}
 
               {!advice && !loading && !error && (
                 <div className="placeholder">
-                  <p>Click "Get Advice" to receive personalized weather recommendations!</p>
+                  <div className="placeholder-icon">🤖</div>
+                  <h4>AI Weather Assistant</h4>
+                  <p>Get personalized advice for today's weather conditions</p>
                   <div className="active-preferences">
-                    <small>Active preferences: {getActivePreferences().length} categories</small>
+                    <small>📋 {getActivePreferences().length} categories selected</small>
                   </div>
                   <button className="get-advice-button" onClick={handleGetAdvice}>
-                    Get Advice
+                    🎯 Get Personalized Advice
                   </button>
                 </div>
               )}
