@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import PreferencesPanel from "./PreferencesPanel";
 import { getPreferences, getActivePreferences } from "./preferencesService";
 import getWeatherAdvice from "./openaiService";
@@ -10,10 +10,39 @@ function AIAssistant({ weatherData }) {
   const [isVisible, setIsVisible] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [userPreferences, setUserPreferences] = useState(getPreferences());
+  const popupRef = useRef(null);
 
   useEffect(() => {
     setUserPreferences(getPreferences());
   }, []);
+
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && isVisible) {
+        setIsVisible(false);
+        setShowPreferences(false);
+      }
+    };
+
+    const handleClickOutside = (e) => {
+      if (popupRef.current && !popupRef.current.contains(e.target) && isVisible) {
+        setIsVisible(false);
+        setShowPreferences(false);
+      }
+    };
+
+    if (isVisible) {
+      document.addEventListener('keydown', handleEscape);
+      document.addEventListener('mousedown', handleClickOutside);
+      document.body.style.overflow = 'hidden'; // Prevent background scroll
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isVisible]);
 
   const handleGetAdvice = async () => {
     if (!weatherData) {
@@ -58,77 +87,81 @@ function AIAssistant({ weatherData }) {
   return (
     <div className="ai-assistant">
       <button
-        className="ai-assistant-button"
-        onClick={() => setIsVisible(!isVisible)}
+        className="ai-advice-trigger"
+        onClick={() => setIsVisible(true)}
+        title="Get AI Weather Advice"
       >
-        🤖 Get Weather Advice
+        🤖 AI Advice
       </button>
 
       {isVisible && (
-        <div className="ai-assistant-popup">
-          <div className="ai-assistant-header">
-            <h3>AI Weather Assistant</h3>
-            <div className="header-buttons">
-              <button
-                className="preferences-button"
-                onClick={() => setShowPreferences(true)}
-                title="Customize advice preferences"
-              >
-                ⚙️
-              </button>
-              <button
-                className="close-button"
-                onClick={() => setIsVisible(false)}
-              >
-                ×
-              </button>
+        <div className="ai-assistant-overlay">
+          <div className="ai-assistant-popup" ref={popupRef}>
+            <div className="ai-assistant-header">
+              <h3>AI Weather Assistant</h3>
+              <div className="header-buttons">
+                <button
+                  className="preferences-button"
+                  onClick={() => setShowPreferences(true)}
+                  title="Customize advice preferences"
+                >
+                  ⚙️
+                </button>
+                <button
+                  className="close-button"
+                  onClick={() => setIsVisible(false)}
+                  title="Close"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div className="ai-assistant-content">
-            {loading && (
-              <div className="loading">
-                <p>Getting personalized weather advice...</p>
-              </div>
-            )}
-
-            {error && (
-              <div className="error">
-                <p>Error: {error}</p>
-                <button onClick={handleGetAdvice}>Try Again</button>
-              </div>
-            )}
-
-            {advice && !loading && !error && (
-              <div className="advice">
-                <p>{advice}</p>
-                <button onClick={handleGetAdvice} className="refresh-advice-button">
-                  Get New Advice
-                </button>
-              </div>
-            )}
-
-            {!advice && !loading && !error && (
-              <div className="placeholder">
-                <p>Click "Get Advice" to receive personalized weather recommendations!</p>
-                <div className="active-preferences">
-                  <small>Active preferences: {getActivePreferences().length} categories</small>
+            <div className="ai-assistant-content">
+              {loading && (
+                <div className="loading">
+                  <p>Getting personalized weather advice...</p>
                 </div>
-                <button className="get-advice-button" onClick={handleGetAdvice}>
-                  Get Advice
-                </button>
+              )}
+
+              {error && (
+                <div className="error">
+                  <p>Error: {error}</p>
+                  <button onClick={handleGetAdvice}>Try Again</button>
+                </div>
+              )}
+
+              {advice && !loading && !error && (
+                <div className="advice">
+                  <p>{advice}</p>
+                  <button onClick={handleGetAdvice} className="refresh-advice-button">
+                    Get New Advice
+                  </button>
+                </div>
+              )}
+
+              {!advice && !loading && !error && (
+                <div className="placeholder">
+                  <p>Click "Get Advice" to receive personalized weather recommendations!</p>
+                  <div className="active-preferences">
+                    <small>Active preferences: {getActivePreferences().length} categories</small>
+                  </div>
+                  <button className="get-advice-button" onClick={handleGetAdvice}>
+                    Get Advice
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {showPreferences && (
+              <div className="preferences-overlay">
+                <PreferencesPanel
+                  onClose={() => setShowPreferences(false)}
+                  onPreferencesChange={handlePreferencesChange}
+                />
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {showPreferences && (
-        <div className="preferences-overlay">
-          <PreferencesPanel
-            onClose={() => setShowPreferences(false)}
-            onPreferencesChange={handlePreferencesChange}
-          />
         </div>
       )}
     </div>

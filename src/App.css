@@ -695,32 +695,46 @@ div#txt {
 
 /* AI Assistant Styles */
 .ai-assistant {
-  position: relative;
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
 }
 
-.ai-assistant-button {
+.ai-advice-trigger {
   background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
   border: none;
   color: white;
-  padding: 12px 20px;
-  font-size: 16px;
-  border-radius: 25px;
+  padding: 8px 16px;
+  font-size: 14px;
+  border-radius: 20px;
   cursor: pointer;
-  margin: 20px;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 15px 0 rgba(116, 79, 168, 0.2);
+  box-shadow: 0 2px 8px 0 rgba(116, 79, 168, 0.3);
+  font-family: "Oxygen", sans-serif;
+  font-weight: 500;
 }
 
-.ai-assistant-button:hover {
+.ai-advice-trigger:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px 0 rgba(116, 79, 168, 0.4);
+  box-shadow: 0 4px 12px 0 rgba(116, 79, 168, 0.5);
+}
+
+.ai-assistant-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.3s ease-out;
 }
 
 .ai-assistant-popup {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 15px;
@@ -730,8 +744,28 @@ div#txt {
   max-height: 80vh;
   overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
   color: #333;
+  animation: popupSlideIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes popupSlideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .ai-assistant-header {
@@ -1000,9 +1034,19 @@ div#txt {
 
 /* Responsive Design */
 @media (max-width: 768px) {
+  .ai-assistant {
+    top: 15px;
+    right: 15px;
+  }
+
+  .ai-advice-trigger {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
   .ai-assistant-popup {
     width: 95%;
-    margin: 20px;
+    max-height: 85vh;
   }
 
   .preferences-panel {
@@ -1020,5 +1064,38 @@ div#txt {
 
   .preferences-content {
     padding: 20px;
+  }
+}
+
+@media (max-width: 603px) {
+  .ai-assistant {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    margin: 10px 20px;
+  }
+
+  .ai-advice-trigger {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .ai-assistant-popup {
+    width: 98%;
+    max-height: 90vh;
+  }
+}
+
+@media (max-width: 480px) {
+  .ai-assistant-content {
+    padding: 15px;
+  }
+
+  .ai-assistant-popup {
+    border-radius: 10px;
+  }
+
+  .preferences-content {
+    padding: 15px;
   }
 }

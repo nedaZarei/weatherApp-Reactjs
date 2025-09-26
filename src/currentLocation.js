@@ -2,6 +2,7 @@ import React from "react";
 import apiKeys from "./apiKeys";
 import Clock from "react-live-clock";
 import Forcast from "./forcast";
+import AIAssistant from "./AIAssistant";
 import loader from "./images/WeatherIcons.gif";
 import ReactAnimatedWeather from "react-animated-weather";
 const dateBuilder = (d) => {
@@ -161,6 +162,7 @@ class Weather extends React.Component {
               <h2>{this.state.city}</h2>
               <h3>{this.state.country}</h3>
             </div>
+            <AIAssistant weatherData={this.state} />
             <div className="mb-icon">
               {" "}
               <ReactAnimatedWeather
