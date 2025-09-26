@@ -23,14 +23,29 @@ function AIAssistant({ weatherData }) {
 
     setLoading(true);
     setError("");
+    setAdvice("");
 
     try {
       const activePrefs = getActivePreferences();
       const adviceText = await getWeatherAdvice(weatherData, activePrefs);
-      setAdvice(adviceText);
+
+      if (adviceText && typeof adviceText === 'string' && adviceText.trim()) {
+        setAdvice(adviceText);
+      } else {
+        throw new Error("Invalid response from AI service");
+      }
     } catch (err) {
-      setError("Failed to get weather advice. Please try again.");
       console.error("Error getting advice:", err);
+
+      if (err.response && err.response.status === 401) {
+        setError("API authentication failed. Please check your OpenAI API key.");
+      } else if (err.response && err.response.status === 429) {
+        setError("API rate limit exceeded. Please try again later.");
+      } else if (err.name === 'NetworkError' || err.code === 'NETWORK_ERROR') {
+        setError("Network error. Please check your internet connection.");
+      } else {
+        setError("Failed to get weather advice. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
