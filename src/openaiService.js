@@ -1,7 +1,8 @@
 import axios from "axios";
 import apiKeys from "./apiKeys";
+import { generatePreferencePrompt } from "./preferencesService";
 
-const getWeatherAdvice = async (weatherData) => {
+const getWeatherAdvice = async (weatherData, activePreferences = []) => {
   try {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -10,11 +11,11 @@ const getWeatherAdvice = async (weatherData) => {
         messages: [
           {
             role: "system",
-            content: "You are a helpful weather assistant that provides practical advice based on current weather conditions. Keep responses concise and useful."
+            content: "You are a helpful weather assistant that provides practical advice based on current weather conditions. Keep responses concise and useful. Focus on the specific categories requested by the user."
           },
           {
             role: "user",
-            content: `Based on the current weather conditions: ${weatherData.main} in ${weatherData.city}, ${weatherData.country}, temperature ${weatherData.temperatureC}°C, humidity ${weatherData.humidity}%, provide helpful advice for someone going outside today.`
+            content: `Based on the current weather conditions: ${weatherData.main} in ${weatherData.city}, ${weatherData.country}, temperature ${weatherData.temperatureC}°C, humidity ${weatherData.humidity}%, provide advice focusing specifically on: ${generatePreferencePrompt(activePreferences)}. Keep it practical and actionable.`
           }
         ],
         max_tokens: 150,
