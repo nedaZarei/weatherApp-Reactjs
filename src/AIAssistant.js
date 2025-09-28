@@ -144,9 +144,19 @@ function AIAssistant({ weatherData }) {
 
               {error && !advice && (
                 <div className="error">
-                  <h4>⚠️ Unable to Get Advice</h4>
+                  <h4>
+                    {errorInfo && errorInfo.type === 'RATE_LIMIT' ?
+                      '⏱️ Rate Limit Reached' :
+                      '⚠️ Unable to Get Advice'
+                    }
+                  </h4>
                   <p>{error}</p>
-                  {errorInfo && (
+                  {errorInfo && errorInfo.type === 'RATE_LIMIT' && (
+                    <div className="rate-limit-info">
+                      <small>The AI service has temporarily limited requests. Weather-based advice is still available.</small>
+                    </div>
+                  )}
+                  {errorInfo && errorInfo.type !== 'RATE_LIMIT' && (
                     <div className="error-details">
                       <small>Error type: {errorInfo.type}</small>
                     </div>
@@ -174,7 +184,9 @@ function AIAssistant({ weatherData }) {
                           <strong>Using Offline Advice</strong>
                           <small>
                             {errorInfo ?
-                              `AI service unavailable (${errorInfo.type}). Showing weather-based recommendations.` :
+                              errorInfo.type === 'RATE_LIMIT' ?
+                                'AI service rate limit reached. Showing weather-based recommendations.' :
+                                `AI service unavailable (${errorInfo.type}). Showing weather-based recommendations.` :
                               'AI service unavailable. Showing weather-based recommendations.'
                             }
                           </small>

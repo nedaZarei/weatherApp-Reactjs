@@ -2,6 +2,10 @@ import axios from "axios";
 import apiKeys from "./apiKeys";
 import { generatePreferencePrompt } from "./preferencesService";
 
+// Simple request queue to prevent simultaneous requests
+let requestQueue = [];
+let isProcessing = false;
+
 const formatWeatherData = (weatherData) => {
   return {
     condition: weatherData.main || 'Unknown',
@@ -170,11 +174,12 @@ const classifyError = (error) => {
       };
     case 429:
       const retryAfter = error.response.headers['retry-after'];
+      const waitTime = retryAfter ? parseInt(retryAfter) : 60;
       return {
         type: 'RATE_LIMIT',
-        message: `Too many requests. Please wait ${retryAfter ? `${retryAfter} seconds` : 'a moment'} before trying again.`,
+        message: `AI service rate limit reached. Please wait ${waitTime} seconds before trying again.`,
         retryable: true,
-        retryAfter: retryAfter ? parseInt(retryAfter) * 1000 : 60000
+        retryAfter: waitTime * 1000
       };
     case 400:
       return {
@@ -240,10 +245,15 @@ const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
         throw { ...error, classified: errorInfo };
       }
 
-      // Exponential backoff with jitter
-      const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-      const jitter = Math.random() * 1000;
-      const delay = errorInfo.retryAfter || (baseDelay + jitter);
+      // Use specific retry delay for rate limits, exponential backoff for others
+      let delay;
+      if (errorInfo.type === 'RATE_LIMIT' && errorInfo.retryAfter) {
+        delay = errorInfo.retryAfter;
+      } else {
+        const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        const jitter = Math.random() * 1000;
+        delay = baseDelay + jitter;
+      }
 
       console.log(`Retrying after ${Math.round(delay)}ms...`);
       await sleep(delay);
@@ -253,89 +263,116 @@ const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
   throw lastError;
 };
 
-const getWeatherAdvice = async (weatherData, activePreferences = []) => {
-  if (!weatherData) {
-    const error = new Error("Weather data is required");
-    error.classified = { type: 'VALIDATION', message: 'Weather data not available', retryable: false };
-    throw error;
-  }
+const processQueue = async () => {
+  if (isProcessing || requestQueue.length === 0) return;
 
-  const formattedWeather = formatWeatherData(weatherData);
+  isProcessing = true;
+  const { resolve, reject, requestFn } = requestQueue.shift();
 
   try {
-    // Validate API key existence
-    if (!apiKeys.openaiApiKey || apiKeys.openaiApiKey === "your-openai-api-key-here") {
-      const error = new Error("OpenAI API key not configured");
-      error.classified = {
-        type: 'CONFIG',
-        message: 'AI service not configured. Using fallback advice.',
-        retryable: false
-      };
+    const result = await requestFn();
+    resolve(result);
+  } catch (error) {
+    reject(error);
+  } finally {
+    isProcessing = false;
+    // Process next item in queue
+    setTimeout(processQueue, 100); // Small delay between requests
+  }
+};
+
+const queueRequest = (requestFn) => {
+  return new Promise((resolve, reject) => {
+    requestQueue.push({ resolve, reject, requestFn });
+    processQueue();
+  });
+};
+
+const getWeatherAdvice = async (weatherData, activePreferences = []) => {
+  return queueRequest(async () => {
+    if (!weatherData) {
+      const error = new Error("Weather data is required");
+      error.classified = { type: 'VALIDATION', message: 'Weather data not available', retryable: false };
       throw error;
     }
 
-    const { systemPrompt, userPrompt } = createStructuredPrompt(formattedWeather, activePreferences);
+    const formattedWeather = formatWeatherData(weatherData);
 
-    const requestConfig = {
-      data: {
-        model: "gpt-3.5-turbo",
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          },
-          {
-            role: "user",
-            content: userPrompt
-          }
-        ],
-        max_tokens: 300,
-        temperature: 0.7
-      },
-      config: {
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKeys.openaiApiKey}`
-        }
+    try {
+      // Validate API key existence
+      if (!apiKeys.openaiApiKey || apiKeys.openaiApiKey === "your-openai-api-key-here") {
+        const error = new Error("OpenAI API key not configured");
+        error.classified = {
+          type: 'CONFIG',
+          message: 'AI service not configured. Using fallback advice.',
+          retryable: false
+        };
+        throw error;
       }
-    };
 
-    const response = await makeOpenAIRequest(requestConfig);
-    const rawResponse = response.data.choices[0].message.content.trim();
+      const { systemPrompt, userPrompt } = createStructuredPrompt(formattedWeather, activePreferences);
 
-    if (!rawResponse || rawResponse.length < 10) {
-      throw new Error('Empty or insufficient response from OpenAI API');
-    }
+      const requestConfig = {
+        data: {
+          model: "gpt-3.5-turbo",
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt
+            },
+            {
+              role: "user",
+              content: userPrompt
+            }
+          ],
+          max_tokens: 300,
+          temperature: 0.7
+        },
+        config: {
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKeys.openaiApiKey}`
+          }
+        }
+      };
 
-    const structuredAdvice = parseStructuredResponse(rawResponse);
+      const response = await makeOpenAIRequest(requestConfig);
+      const rawResponse = response.data.choices[0].message.content.trim();
 
-    if (structuredAdvice && validateAdviceContent(structuredAdvice)) {
-      console.log('Successfully generated structured advice from OpenAI');
-      return structuredAdvice;
-    } else {
-      console.warn('OpenAI response parsing failed, using fallback advice');
+      if (!rawResponse || rawResponse.length < 10) {
+        throw new Error('Empty or insufficient response from OpenAI API');
+      }
+
+      const structuredAdvice = parseStructuredResponse(rawResponse);
+
+      if (structuredAdvice && validateAdviceContent(structuredAdvice)) {
+        console.log('Successfully generated structured advice from OpenAI');
+        return structuredAdvice;
+      } else {
+        console.warn('OpenAI response parsing failed, using fallback advice');
+        const fallbackAdvice = getFallbackAdvice(formattedWeather);
+        // Mark as fallback for user notification
+        fallbackAdvice._isFallback = true;
+        return fallbackAdvice;
+      }
+
+    } catch (error) {
+      const errorInfo = error.classified || classifyError(error);
+
+      console.error("OpenAI API error:", {
+        type: errorInfo.type,
+        message: errorInfo.message,
+        originalError: error.message
+      });
+
+      // Always return fallback advice with error info
       const fallbackAdvice = getFallbackAdvice(formattedWeather);
-      // Mark as fallback for user notification
       fallbackAdvice._isFallback = true;
+      fallbackAdvice._errorInfo = errorInfo;
+
       return fallbackAdvice;
     }
-
-  } catch (error) {
-    const errorInfo = error.classified || classifyError(error);
-
-    console.error("OpenAI API error:", {
-      type: errorInfo.type,
-      message: errorInfo.message,
-      originalError: error.message
-    });
-
-    // Always return fallback advice with error info
-    const fallbackAdvice = getFallbackAdvice(formattedWeather);
-    fallbackAdvice._isFallback = true;
-    fallbackAdvice._errorInfo = errorInfo;
-
-    return fallbackAdvice;
-  }
+  });
 };
 
 export default getWeatherAdvice;
