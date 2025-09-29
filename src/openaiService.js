@@ -289,6 +289,13 @@ const queueRequest = (requestFn) => {
 };
 
 const getWeatherAdvice = async (weatherData, activePreferences = []) => {
+    console.log('🔑 API Key Debug:', {
+    hasKey: !!apiKeys.openaiApiKey,
+    keyLength: apiKeys.openaiApiKey ? apiKeys.openaiApiKey.length : 0,
+    keyPrefix: apiKeys.openaiApiKey ? apiKeys.openaiApiKey.substring(0, 10) + '...' : 'None',
+    endpoint: "https://api.gapgpt.app/v1/chat/completions"
+  });
+
   return queueRequest(async () => {
     if (!weatherData) {
       const error = new Error("Weather data is required");
