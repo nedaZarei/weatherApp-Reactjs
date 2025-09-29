@@ -213,7 +213,7 @@ const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
       console.log(`OpenAI API attempt ${attempt}/${maxRetries}`);
 
       const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
+        "https://api.gapgpt.app/v1/chat/completions",
         requestConfig.data,
         {
           ...requestConfig.config,
@@ -314,7 +314,7 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
 
       const requestConfig = {
         data: {
-          model: "gpt-3.5-turbo",
+          model: "gpt-5-mini",
           messages: [
             {
               role: "system",

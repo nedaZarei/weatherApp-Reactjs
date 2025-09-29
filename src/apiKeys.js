@@ -5,7 +5,7 @@ const apiKeys = {
 };
 
 // Add validation
-if (!apiKeys.openaiApiKey || apiKeys.openaiApiKey === "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") {
+if (!apiKeys.openaiApiKey || apiKeys.openaiApiKey === "your-openai-api-key-here") {
   console.warn("OpenAI API key not configured properly");
 }
 
