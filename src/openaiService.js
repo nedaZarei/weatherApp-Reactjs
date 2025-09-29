@@ -18,21 +18,12 @@ const formatWeatherData = (weatherData) => {
 };
 
 const createStructuredPrompt = (formattedWeather, activePreferences) => {
-  const weatherContext = `Current weather: ${formattedWeather.condition} in ${formattedWeather.city}, ${formattedWeather.country}. Temperature: ${formattedWeather.temperature}°C, Humidity: ${formattedWeather.humidity}%.`;
+  const systemPrompt = `You are a weather assistant. Format your response exactly as:
+CLOTHING: [1 sentence]
+ACTIVITIES: [1 sentence]
+HEALTH: [1 sentence]`;
 
-  const systemPrompt = `You are a weather assistant providing practical advice. Always respond with structured advice in exactly this format:
-
-CLOTHING: [specific clothing recommendations]
-ACTIVITIES: [activity suggestions for this weather]
-HEALTH: [health and safety tips]
-
-Keep each section to 1-2 concise sentences. Be specific and actionable.`;
-
-  const userPrompt = `${weatherContext}
-
-Provide structured advice focusing on: ${generatePreferencePrompt(activePreferences)}.
-
-Remember to format your response with CLOTHING:, ACTIVITIES:, and HEALTH: sections.`;
+  const userPrompt = `Weather: ${formattedWeather.condition}, ${formattedWeather.temperature}°C, ${formattedWeather.city}. Give advice.`;
 
   return { systemPrompt, userPrompt };
 };
@@ -62,12 +53,10 @@ const parseStructuredResponse = (response) => {
         currentSection = 'health';
         sections.health = line.substring(line.indexOf(':') + 1).trim();
       } else if (currentSection && line.trim()) {
-        // Continue previous section if no new header found
         sections[currentSection] += ' ' + line.trim();
       }
     });
 
-    // Validate that we have meaningful content
     const hasContent = Object.values(sections).some(content => content.length > 10);
 
     return hasContent ? sections : null;
@@ -87,7 +76,6 @@ const getFallbackAdvice = (formattedWeather) => {
     health: ''
   };
 
-  // Temperature-based clothing advice
   if (temp <= 0) {
     fallback.clothing = 'Wear heavy winter coat, gloves, hat, and warm boots. Layer up with thermal underwear.';
   } else if (temp <= 10) {
@@ -100,7 +88,6 @@ const getFallbackAdvice = (formattedWeather) => {
     fallback.clothing = 'Wear minimal, light-colored, breathable fabrics. Sun hat and sunglasses recommended.';
   }
 
-  // Condition-based activity advice
   if (condition.includes('rain') || condition.includes('drizzle')) {
     fallback.activities = 'Indoor activities recommended. If going out, bring an umbrella and wear waterproof shoes.';
   } else if (condition.includes('snow')) {
@@ -111,7 +98,6 @@ const getFallbackAdvice = (formattedWeather) => {
     fallback.activities = 'Mixed conditions. Check forecast before planning outdoor activities.';
   }
 
-  // General health advice
   if (temp > 30) {
     fallback.health = 'Stay hydrated, avoid prolonged sun exposure, and take breaks in shade or AC.';
   } else if (temp < 0) {
@@ -141,7 +127,6 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const classifyError = (error) => {
   if (!error.response) {
-    // Network error, timeout, or connection issue
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
       return {
         type: 'TIMEOUT',
@@ -213,15 +198,14 @@ const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
       console.log(`OpenAI API attempt ${attempt}/${maxRetries}`);
 
       const response = await axios.post(
-        "https://api.gapgpt.app/v1/chat/completions",
+        "/v1/chat/completions",
         requestConfig.data,
         {
           ...requestConfig.config,
-          timeout: 30000 // 30 second timeout
+          timeout: 30000
         }
       );
 
-      // Validate response structure
       if (!response.data || !response.data.choices || !response.data.choices[0] || !response.data.choices[0].message) {
         throw new Error('Invalid response structure from OpenAI API');
       }
@@ -240,12 +224,13 @@ const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
         retryable: errorInfo.retryable
       });
 
-      // Don't retry if error is not retryable or if this was the last attempt
       if (!errorInfo.retryable || attempt === maxRetries) {
-        throw { ...error, classified: errorInfo };
+        const classifiedError = new Error(errorInfo.message);
+        classifiedError.classified = errorInfo;
+        classifiedError.originalError = error;
+        throw classifiedError;
       }
 
-      // Use specific retry delay for rate limits, exponential backoff for others
       let delay;
       if (errorInfo.type === 'RATE_LIMIT' && errorInfo.retryAfter) {
         delay = errorInfo.retryAfter;
@@ -260,7 +245,10 @@ const makeOpenAIRequest = async (requestConfig, maxRetries = 3) => {
     }
   }
 
-  throw lastError;
+  const finalError = new Error('Max retries exceeded');
+  finalError.classified = classifyError(lastError);
+  finalError.originalError = lastError;
+  throw finalError;
 };
 
 const processQueue = async () => {
@@ -276,8 +264,7 @@ const processQueue = async () => {
     reject(error);
   } finally {
     isProcessing = false;
-    // Process next item in queue
-    setTimeout(processQueue, 100); // Small delay between requests
+    setTimeout(processQueue, 100);
   }
 };
 
@@ -289,11 +276,11 @@ const queueRequest = (requestFn) => {
 };
 
 const getWeatherAdvice = async (weatherData, activePreferences = []) => {
-    console.log('🔑 API Key Debug:', {
+  console.log('🔑 API Key Debug:', {
     hasKey: !!apiKeys.openaiApiKey,
     keyLength: apiKeys.openaiApiKey ? apiKeys.openaiApiKey.length : 0,
     keyPrefix: apiKeys.openaiApiKey ? apiKeys.openaiApiKey.substring(0, 10) + '...' : 'None',
-    endpoint: "https://api.gapgpt.app/v1/chat/completions"
+    endpoint: "/v1/chat/completions (via proxy)"
   });
 
   return queueRequest(async () => {
@@ -306,7 +293,6 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
     const formattedWeather = formatWeatherData(weatherData);
 
     try {
-      // Validate API key existence
       if (!apiKeys.openaiApiKey || apiKeys.openaiApiKey === "your-openai-api-key-here") {
         const error = new Error("OpenAI API key not configured");
         error.classified = {
@@ -321,7 +307,7 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
 
       const requestConfig = {
         data: {
-          model: "gpt-5-mini",
+          model: "gpt-4o-mini",
           messages: [
             {
               role: "system",
@@ -332,7 +318,7 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
               content: userPrompt
             }
           ],
-          max_tokens: 300,
+          max_tokens: 1000,
           temperature: 0.7
         },
         config: {
@@ -344,21 +330,31 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
       };
 
       const response = await makeOpenAIRequest(requestConfig);
+      console.log('Raw API response:', response.data);
+      console.log('Choices array:', response.data.choices);
+      console.log('First choice:', response.data.choices[0]);
+      console.log('Message object:', response.data.choices[0]?.message);
+      
       const rawResponse = response.data.choices[0].message.content.trim();
+      console.log('AI message content:', rawResponse);
 
       if (!rawResponse || rawResponse.length < 10) {
         throw new Error('Empty or insufficient response from OpenAI API');
       }
 
       const structuredAdvice = parseStructuredResponse(rawResponse);
+      console.log('Parsed structured advice:', structuredAdvice);
 
       if (structuredAdvice && validateAdviceContent(structuredAdvice)) {
-        console.log('Successfully generated structured advice from OpenAI');
+        console.log('✅ Successfully generated structured advice from OpenAI');
         return structuredAdvice;
       } else {
-        console.warn('OpenAI response parsing failed, using fallback advice');
+        console.warn('⚠️ OpenAI response parsing failed, using fallback advice');
+        console.log('Validation result:', {
+          hasStructure: !!structuredAdvice,
+          isValid: structuredAdvice ? validateAdviceContent(structuredAdvice) : false
+        });
         const fallbackAdvice = getFallbackAdvice(formattedWeather);
-        // Mark as fallback for user notification
         fallbackAdvice._isFallback = true;
         return fallbackAdvice;
       }
@@ -372,7 +368,6 @@ const getWeatherAdvice = async (weatherData, activePreferences = []) => {
         originalError: error.message
       });
 
-      // Always return fallback advice with error info
       const fallbackAdvice = getFallbackAdvice(formattedWeather);
       fallbackAdvice._isFallback = true;
       fallbackAdvice._errorInfo = errorInfo;
